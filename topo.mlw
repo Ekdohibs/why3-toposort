@@ -91,25 +91,20 @@ module TestDefinition
   use import Path
   use import list.List
 
+	lemma no_empty_path:
+	  forall g:graph. forall x:vertex. not (path_to g Nil x)
+
+  lemma path_for_two_edges:
+	  forall g:graph. forall x y z:vertex. S.mem (x,y) (edges g) /\ S.mem (y,z) (edges g) -> path_to g (Cons x (Cons y Nil)) z
+
   lemma pred_smaller:
-     true
+    forall g:graph. forall tsort:tsort. sort g tsort -> forall x y:vertex. S.mem y (preds g x) -> M.get tsort y < M.get tsort x
 
   lemma no_direct_cycle1:
-     true
+    forall g:graph. forall tsort:tsort. forall x y:vertex. sort g tsort -> not (S.mem (x,y) (edges g) /\ S.mem (y,x) (edges g))
 
   lemma no_direct_cycle2:
-     true
-
-
-  let rec lemma path_ordered (g:graph) (tsort:tsort) (p:path) (v1 v2:vertex)
-   requires { true }
-   requires { true }
-   ensures  { true }
-   variant { p }
-   =
-   ()
-
- lemma no_cycle: true
+    forall g:graph. forall tsort:tsort. forall x:vertex. sort g tsort -> not (S.mem (x,x) (edges g))
 
 end
 
@@ -164,26 +159,57 @@ module Topo
 
   type marked = (S.set vertex)
 
+  let rec lemma path_ordered (g:graph) (tsort:tsort) (p:path) (v1 v2:vertex)
+   requires { path_to g (Cons v1 p) v2 }
+   requires { sort g tsort }
+   ensures  { M.get tsort v1 < M.get tsort v2 }
+   variant { p }
+   =
+   match p with
+	 | Nil -> ()
+	 | Cons v3 p1 -> path_ordered g tsort p1 v3 v2
+	 end
+
+  lemma no_cycle:
+   forall g:graph. forall tsort:tsort. sort g tsort -> not (cycle_in g)
+
+
   exception Cycle_found
 
   predicate inv (g:graph) (m:H.t int) =
-    true
+    (forall v: vertex. S.mem v (H.defined m) -> S.subset (preds g v) (H.defined m)) /\
+		(S.subset (H.defined m) (vertices g)) /\
+		(forall x: vertex. S.mem x (H.defined m) -> 0 <= m[x] < S.cardinal (H.defined m)) /\
+		(forall x y: vertex. S.mem x (H.defined m) /\ S.mem y (preds g x) -> (m[y] < m[x])) /\
+		(forall x y: vertex. S.mem x m.defined /\ S.mem y m.defined /\ m[x] = m[y] -> x = y)
+
+  let rec ghost add_to_path (g:graph) (x:vertex) (u:vertex) (v:vertex) (p:path): path
+	  requires { path_to g (Cons x p) u }
+		requires { S.mem (u,v) (edges g) }
+		variant { p }
+		ensures { path_to g (Cons x result) v }
+  =
+	  match p with
+		| Nil -> Cons u Nil
+		| Cons a p1 -> Cons a (add_to_path g a u v p1)
+		end
 
   let rec dfs (g:graph) (v:vertex)
               (seen:marked) (tsort:H.t int)
+							(ghost seen_path: M.map vertex path)
               : unit
     requires { inv g tsort }
-    requires { true }
-    requires { true }
-    requires { true }
-    requires { true }
-    diverges
-    ensures { true }
-    ensures { true }
-    ensures { true }
+    requires { S.subset seen (vertices g) }
+    requires { S.mem v (vertices g) }
+		requires { forall x. S.mem x seen -> path_to g (Cons v (M.get seen_path x)) x }
+    variant { S.cardinal (vertices g) - S.cardinal seen }
+    ensures { S.subset (H.defined (old tsort)) (H.defined tsort) }
+    ensures { S.subset (preds g v) (H.defined tsort) }
+    ensures { S.mem v (H.defined tsort) }
     ensures { inv g tsort }
-    ensures { true }
-    raises  { Cycle_found -> true  }
+    ensures { forall x: vertex. S.mem x (old tsort).defined -> (old tsort)[x] = tsort[x] }
+		ensures { forall x: vertex. S.mem x seen /\ S.mem x tsort.defined -> S.mem x (old tsort).defined }
+    raises  { Cycle_found -> cycle_in g }
    =
   'Init:
    if S.mem v seen then raise Cycle_found;
@@ -194,35 +220,49 @@ module Topo
      let seen' = S.add v seen in
      while not (S.is_empty !p) do
       invariant { inv g tsort }
-      invariant { true }
-      invariant { true }
-      invariant { true }
-      invariant { true }
+      invariant { S.subset !p (preds g v) }
+      invariant { S.subset (H.defined (at tsort 'Init)) (H.defined tsort) }
+      invariant { S.subset (preds g v) (S.union !p (H.defined tsort)) }
+      invariant { forall x: vertex. S.mem x (at tsort 'Init).defined -> (at tsort 'Init)[x] = tsort[x] }
+			invariant { not (S.mem v tsort.defined) }
+		  invariant { forall x: vertex. S.mem x seen /\ S.mem x tsort.defined -> S.mem x (at tsort 'Init).defined }
+			variant { S.cardinal !p }
       let u = S.choose !p in
-      dfs g u seen' tsort;
+			let ghost npath = ref seen_path in
+			let ghost z = ref seen in
+			while not (S.is_empty !z) do
+			  variant { S.cardinal !z }
+				invariant { S.subset !z seen }
+				invariant { forall x. S.mem x seen /\ not S.mem x !z -> path_to g (Cons u (M.get !npath x)) x }
+			  let ghost t = S.choose !z in
+			  npath := M.set !npath t (Cons v (M.get seen_path t));
+				z := S.remove t !z
+			done;
+			npath := M.set !npath v Nil;
+      dfs g u seen' tsort !npath;
       p := S.remove u !p
       done;
     end;
      H.add tsort v (H.size tsort)
-    end
+   end
 
 
     let topo_tsort (g:graph): H.t int
-      raises  { Cycle_found -> true  }
+      raises  { Cycle_found -> cycle_in g  }
       ensures { sort g result.contents }
       ensures { S.(==) result.defined (vertices g) }
-      diverges
       =
     'Init:
       let tsort = H.create () in
       let p = ref (vertices g) in
       while not (S.is_empty !p) do
         invariant { inv g tsort }
-        invariant { true }
-        invariant { true }
-        invariant { true }
+        invariant { S.subset !p (vertices g) }
+        invariant { S.subset (H.defined (at tsort 'Init)) (H.defined tsort) }
+        invariant { S.subset (vertices g) (S.union !p (H.defined tsort)) }
+				variant { S.cardinal !p }
         let u = S.choose !p in
-        dfs g u (S.empty) tsort;
+        dfs g u (S.empty) tsort (Const.const Nil);
         p := S.remove u !p
      done;
      tsort
@@ -234,28 +274,36 @@ module Topo
       tsort: H.t int
     }
 
+		let rec ghost range_set i: S.set int
+		  ensures { forall x. S.mem x result <-> 0 <= x < i }
+			ensures { i >= 0 -> S.cardinal result = i }
+			variant { i }
+	  =
+		 if i <= 0 then S.empty else S.add (i - 1) (range_set (i - 1))
 
     let topo (g:graph): topo
-      raises  { Cycle_found -> true }
+      raises  { Cycle_found -> cycle_in g }
       requires { not (S.is_empty (vertices g)) }
       ensures { topological_sort g result.order.elts result.tsort.contents }
       ensures { S.(==) result.tsort.defined (vertices g) }
       ensures { result.order.length = S.cardinal (vertices g) }
-      diverges
      =
       let tsort = topo_tsort g in
       let order = Array.make (S.cardinal (vertices g)) (S.choose (vertices g)) in
       let p = ref (vertices g) in
+			let ghost todo = ref (range_set (S.cardinal (vertices g))) in
       while not (S.is_empty !p) do
-        invariant { true }
-        invariant { true }
-        invariant { true }
-        invariant { true }
-        invariant { true }
-        invariant { true }
+        invariant { S.subset !p (vertices g) }
+        invariant { forall x. S.mem x (S.diff (vertices g) !p) -> order[H.([]) tsort x] = x }
+        invariant { forall i. 0 <= i < S.cardinal (vertices g) -> S.mem order[i] (vertices g) }
+        invariant { S.cardinal !todo = S.cardinal !p }
+        invariant { forall x. S.mem x !p -> S.mem (H.([]) tsort x) !todo }
+        invariant { forall i. 0 <= i < S.cardinal (vertices g) /\ not (S.mem i !todo) -> H.([]) tsort order[i] = i }
+				variant { S.cardinal !p }
         let u = S.choose !p in
         order[H.find tsort u] <- u;
         p := S.remove u !p;
+				todo := S.remove (H.find tsort u) !todo;
      done;
      {order = order; tsort = tsort}
 
@@ -301,10 +349,124 @@ module Dominators
   lemma not_disjoint_mem:
     forall s1 s2: S.set vertex. not_disjoint s1 s2 <-> (exists x. S.mem x s1 /\ S.mem x s2)
 
- lemma not_disjoint_singleton:
+  lemma not_disjoint_singleton:
     forall s1: S.set vertex. forall x: vertex. not_disjoint s1 (S.singleton x) <-> S.mem x s1
 
+  predicate partial_domine (g:graph) (root x y:vertex) (a: S.set vertex) =
+   y <> root /\
+   forall p. path_to g (Cons root p) y -> not_disjoint a (S.add root (elements p)) -> S.mem x (S.add root (elements p))
+
+	predicate partial_idomine (g:graph) (root x y: vertex) (a: S.set vertex) =
+	  partial_domine g root x y a /\ (forall x'. x' <> x -> partial_domine g root x' y a -> domine g root x' x)
+
+  lemma partial_domine_subset: forall g root x y a1 a2. partial_domine g root x y a1 /\ S.subset a2 a1 -> partial_domine g root x y a2
+	lemma partial_domine_union: forall g root x y a1 a2. partial_domine g root x y (S.union a1 a2) -> partial_domine g root x y a2
+
+  let rec lemma path_concat (g: graph) (u v:vertex) (p1 p2:path)
+	  requires { path_to g p1 u }
+		requires { path_to g (Cons u p2) v }
+		ensures { path_to g (p1 ++ (Cons u p2)) v }
+		variant { p1 }
+	= match p1 with | Nil -> () | Cons _ l -> match l with Nil -> () | Cons _ _ -> path_concat g u v l p2 end end
+
+	let rec lemma concat_elems (p1 p2: path)
+	  ensures { S.(==) (elements (p1 ++ p2)) (S.union (elements p1) (elements p2)) }
+		variant { p1 }
+  = match p1 with | Nil -> () | Cons _ l -> concat_elems l p2 end
+
+  let rec lemma cut_path (g : graph) (u v: vertex) (p1 p2:path)
+	  requires { path_to g (p1 ++ (Cons u p2)) v }
+		requires { p1 <> Nil }
+		ensures { path_to g p1 u }
+		ensures { path_to g (Cons u p2) v }
+		variant { p1 }
+	= match p1 with | Nil -> () | Cons _ l -> match l with Nil -> () | Cons _ _ -> cut_path g u v l p2 end end
+
+  let rec ghost elem_mem (p : path) (x : vertex)
+	  requires { S.mem x (elements p) }
+		ensures { let (l1, l2) = result in p = l1 ++ Cons x l2 }
+		variant { p }
+  = match p with Nil -> (Nil, Nil) | Cons a l -> if a = x then (Nil, l) else let (l1, l2) = elem_mem l x in (Cons a l1, l2) end
+
+  lemma partial_domine_self: forall g root x y. y <> root -> partial_domine g root x y (S.singleton x)
+	let lemma partial_idomine_self_lemma (g:graph) (root x y x':vertex) (p1:path)
+	  requires { y <> root }
+		requires { x' <> x }
+		requires { S.mem (x,y) (edges g) }
+		requires { partial_domine g root x' y (S.singleton x) }
+		requires { path_to g (Cons root p1) x }
+		ensures { S.mem x' (S.add root (elements p1)) }
+  =
+		assert { S.mem x' (S.add root (elements (p1 ++ (Cons x Nil)))) };
+		()
+
+	lemma partial_idomine_self: forall g root x y. y <> root /\ x <> root /\ S.mem (x,y) (edges g) ->  partial_idomine g root x y (S.singleton x)
+
+  function path_last (l: path) (u: vertex): vertex =
+	  match l with
+		| Nil -> u
+		| Cons a l -> path_last l a
+		end
+
+  let rec lemma path_to_has_pred (g:graph) (u:vertex) (p:path)
+	  requires { path_to g p u }
+		ensures { S.mem (path_last p u,u) (edges g) }
+		variant { p }
+	=
+	  match p with
+		| Nil -> ()
+		| Cons _ l -> match l with Nil -> () | Cons _ _ -> path_to_has_pred g u l end
+		end
+
+  let rec lemma path_last_elem (p: path) (u: vertex)
+	  ensures { S.mem (path_last p u) (S.add u (elements p)) }
+		variant { p }
+	=
+	  match p with | Nil -> () | Cons a l -> path_last_elem l a end
+
+  lemma path_pred: forall g u v p. path_to g (Cons u p) v ->  not_disjoint (S.add u (elements p)) (preds g v)
+
+  lemma partial_idomine_preds: forall g root x y. y <> root /\ partial_idomine g root x y (preds g y) -> idomine g root x y
+
+  lemma partial_idomine_root: forall g root y a. y <> root /\ partial_idomine g root root y a -> idomine g root root y
+
+  let lemma domine_partial_domine_lemma (g:graph) (root x y z: vertex) (a:S.set vertex) (p:path)
+	  requires { y <> root }
+		requires { z <> root }
+		requires { domine g root x y }
+		requires { partial_domine g root y z a }
+		requires { path_to g (Cons root p) z }
+		requires { not_disjoint a (S.add root (elements p)) }
+		ensures { S.mem x (S.add root (elements p)) }
+	=
+	  let p1, p2 = elem_mem p y in
+		cut_path g y z (Cons root p1) p2;
+		assert { S.mem x (elements (Cons root p1)) };
+		()
+
+  lemma domine_partial_domine: forall g root x y z a. y <> root /\ z <> root /\ domine g root x y /\ partial_domine g root y z a -> partial_domine g root x z a
+
   exception Root
+
+	let lemma root_zero (g:graph) (order:M.map int vertex) (tsort:tsort) root (exi_path : M.map vertex path) (i:int)
+	  requires { topological_sort g order tsort }
+	  requires { S.mem root (vertices g) }
+	  requires { forall v. v <> root -> S.mem v (vertices g) -> path_to g (Cons root (M.get exi_path v)) v }
+		requires { 0 < i < S.cardinal (vertices g) }
+		ensures {	M.get order i <> root }
+	=
+	  if M.get order 0 = root then () else path_to_has_pred g (M.get order 0) (M.get exi_path (M.get order 0))
+
+  let rec lemma path_to_bound (g:graph) (tsort:tsort) (u v:vertex) (p:path)
+	  requires { sort g tsort }
+		requires { path_to g p u }
+		requires { S.mem v (elements p) }
+		ensures { M.get tsort v <= M.get tsort u }
+		variant { p }
+	=
+	  match p with | Nil -> () | Cons a l -> match l with Nil -> () | Cons _ _ -> if a = v then () else path_to_bound g tsort u v l end end
+
+  lemma add_singleton: forall s:(S.set vertex). forall u:vertex. S.(==) (S.add u s) (S.union s (S.singleton u))
 
   let idoms g (root:vertex) (topo:Topo.topo) (ghost exi_path : M.map vertex path)
      : array int
@@ -319,37 +481,70 @@ module Dominators
    ensures { forall i. 0 < i < S.cardinal (vertices g) ->
               idomine g root (topo.Topo.order[result[i]]) (topo.Topo.order[i]) }
    ensures { result[0] = 0 }
-   diverges
    =
     let a = Array.make (S.cardinal (vertices g)) (-1) in
     a[0] <- 0;
     for nv=1 to (S.cardinal (vertices g) - 1) do
+		  invariant { a[0] = 0 }
+		  invariant { forall i. 0 < i < nv -> idomine g root (topo.Topo.order[a[i]]) (topo.Topo.order[i]) }
+			invariant { forall i. 0 < i < nv -> 0 <= a[i] < i }
       'Start_body:
       let v = topo.Topo.order[nv] in
-      let rec find_common n1 n2
-        raises  { Root -> idomine g root root v }
-        diverges
+			assert { v <> root by (forall v. v <> root -> S.mem v (vertices g) -> path_to g (Cons root (M.get exi_path v)) v) };
+      let rec find_common n1 n2 (ghost a1 a2 : S.set vertex)
+			  requires { 0 <= n1 < nv }
+				requires { 0 <= n2 < nv }
+			  requires { a[0] = 0 }
+				requires { forall i. 0 < i < nv -> idomine g root (topo.Topo.order[a[i]]) (topo.Topo.order[i]) }
+				requires { forall i. 0 < i < nv -> 0 <= a[i] < i }
+				requires { partial_domine g root (topo.Topo.order[n1]) v a1 }
+				requires { partial_domine g root (topo.Topo.order[n2]) v a2 }
+				requires { forall x'. x' <> (topo.Topo.order[n2]) /\
+				           partial_domine g root x' v (S.union a1 a2) ->
+									   domine g root x' (topo.Topo.order[n2]) }
+				requires { forall x'. x' <> (topo.Topo.order[n1]) /\
+				           partial_domine g root x' v (S.union a1 a2) ->
+									   domine g root x' (topo.Topo.order[n1]) }
+				ensures { 0 <= result <= n1 }
+				ensures { 0 <= result <= n2 }
+				ensures { partial_idomine g root (topo.Topo.order[result]) v (S.union a1 a2) }
+        variant { n1 + n2 }
        =
         if n1 = n2 then n1
         else
+				let a1, a2 = if n2 < n1 then (a1, a2) else (a2, a1) in
         let n1, n2 = if n2 < n1 then (n1,n2) else (n2,n1) in
-        if a[n1] = 0 then raise Root
-        else find_common a[n1] n2
+				assert { topo.Topo.order[n1] <> topo.Topo.order[n2] };
+				assert { not (partial_domine g root (topo.Topo.order[n1]) v (S.union a1 a2)) by
+				         not (domine g root (topo.Topo.order[n1]) (topo.Topo.order[n2])) };
+				assert { idomine g root (topo.Topo.order[a[n1]]) (topo.Topo.order[n1]) };
+        find_common a[n1] n2 a1 a2
       in
     try
       let p = ref (preds g v) in
+			let ghost _ = path_to_has_pred g v (Cons root (M.get exi_path v)) in
       assert { not (S.is_empty !p) };
       let u = S.choose !p in
       (if u = root then raise Root);
       let nu = Topo.H.find topo.Topo.tsort u in
       let idom_v = ref nu in
+			let ghost a1 = ref (S.singleton u) in
       p := S.remove u !p;
       while not (S.is_empty !p) do
+			 invariant { S.subset !p (preds g v) }
+			 invariant { S.(==) (preds g v) (S.union !p !a1) }
+			 invariant { partial_idomine g root (topo.Topo.order[!idom_v]) v !a1 }
+			 invariant { 0 <= !idom_v < nv }
+			 invariant { a[0] = 0 }
+		   invariant { forall i. 0 < i < nv -> idomine g root (topo.Topo.order[a[i]]) (topo.Topo.order[i]) }
+			 invariant { forall i. 0 < i < nv -> 0 <= a[i] < i }
+			 variant { S.cardinal !p }
        let u = S.choose !p in
        (if u = root then raise Root);
        let nu = Topo.H.find topo.Topo.tsort u in
-       idom_v := find_common !idom_v nu;
+       idom_v := find_common !idom_v nu !a1 (S.singleton u);
        p := S.remove u !p;
+			 a1 := S.add u !a1;
       done;
       a[nv] <- !idom_v;
     with Root ->
