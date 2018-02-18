@@ -204,7 +204,6 @@ module Topo
 		requires { forall x. S.mem x seen -> path_to g (Cons v (M.get seen_path x)) x }
     variant { S.cardinal (vertices g) - S.cardinal seen }
     ensures { S.subset (H.defined (old tsort)) (H.defined tsort) }
-    ensures { S.subset (preds g v) (H.defined tsort) }
     ensures { S.mem v (H.defined tsort) }
     ensures { inv g tsort }
     ensures { forall x: vertex. S.mem x (old tsort).defined -> (old tsort)[x] = tsort[x] }
@@ -214,8 +213,6 @@ module Topo
   'Init:
    if S.mem v seen then raise Cycle_found;
    if not (H.mem tsort v) then begin
-  'Init_loop:
-    begin
      let p = ref (preds g v) in
      let seen' = S.add v seen in
      while not (S.is_empty !p) do
@@ -230,7 +227,7 @@ module Topo
       let u = S.choose !p in
 			let ghost npath = ref seen_path in
 			let ghost z = ref seen in
-			while not (S.is_empty !z) do
+			while not (S.is_empty !z) do (* ghost loop *)
 			  variant { S.cardinal !z }
 				invariant { S.subset !z seen }
 				invariant { forall x. S.mem x seen /\ not S.mem x !z -> path_to g (Cons u (M.get !npath x)) x }
@@ -241,8 +238,7 @@ module Topo
 			npath := M.set !npath v Nil;
       dfs g u seen' tsort !npath;
       p := S.remove u !p
-      done;
-    end;
+     done;
      H.add tsort v (H.size tsort)
    end
 
@@ -252,13 +248,11 @@ module Topo
       ensures { sort g result.contents }
       ensures { S.(==) result.defined (vertices g) }
       =
-    'Init:
       let tsort = H.create () in
       let p = ref (vertices g) in
       while not (S.is_empty !p) do
         invariant { inv g tsort }
         invariant { S.subset !p (vertices g) }
-        invariant { S.subset (H.defined (at tsort 'Init)) (H.defined tsort) }
         invariant { S.subset (vertices g) (S.union !p (H.defined tsort)) }
 				variant { S.cardinal !p }
         let u = S.choose !p in
@@ -488,7 +482,6 @@ module Dominators
 		  invariant { a[0] = 0 }
 		  invariant { forall i. 0 < i < nv -> idomine g root (topo.Topo.order[a[i]]) (topo.Topo.order[i]) }
 			invariant { forall i. 0 < i < nv -> 0 <= a[i] < i }
-      'Start_body:
       let v = topo.Topo.order[nv] in
 			assert { v <> root by (forall v. v <> root -> S.mem v (vertices g) -> path_to g (Cons root (M.get exi_path v)) v) };
       let rec find_common n1 n2 (ghost a1 a2 : S.set vertex)
