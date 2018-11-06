@@ -343,7 +343,7 @@ let idoms g (root:vertex) (topo:Topo.topo) (ghost exi_path : M.map vertex path)
     in
     try
       let p = ref (preds g v) in
-			let ghost _ = path_to_has_pred g v (Cons root (M.get exi_path v)) in
+			let ghost _ = path_to_has_pred g v (Cons root (M.get exi_path v)) in@\label{line:idom_ghost}@
       assert { not (S.is_empty !p) };
       let u = S.choose !p in
       (if u = root then raise Root);
@@ -393,7 +393,7 @@ La condition utilisée est cependant plus faible, ce qui est nécessaire pour qu
 
 On a également quelques autres conditions, qui sont simplement notre invariant de boucle précédent, ainsi que des bornes sur \lstinline{n1} et \lstinline{n2} qui nous garantissent que les accès au tableau des dominateurs immédiats se font toujours à des valeurs déjà calculées. Enfin, cette fonction termine puisque \lstinline{n1 + n2} décroît, étant donné qu'à chaque étape, au moins un des ces sommets est remplacé par son dominateur immédiat.
 
-Muni de cette fonction, calculer le dominateur immédiat de \lstinline{v} est naturel~: on itère sur les prédécesseurs, en rajoutant un prédécesseur (correspondant au dominateur partiel pour un ensemble singleton le contenant) à chaque étape. L'invariant de cette boucle est donné aux lignes \ref{line:idom_loop_c_begin} à \ref{line:idom_loop_c_end}. On a comme d'habitude un ensemble de sommets restant à traiter~; on garde comme invariant l'invariant global sur la correction des valeurs déjà calculées du tableau des dominateurs immédiats, ainsi que le fait que la valeur actuelle \lstinline{idom_v} est un dominateur partiel immédiat pour l'ensemble des prédécesseurs déjà traités. On a finalement aussi les invariants classiques de ce genre de boucle, stipulant que l'ensemble des sommets restant à traiter est bien un sous-ensemble de ceux à traiter, et que son union avec ceux déjà traités est égale à ceux à traiter.
+Muni de cette fonction, calculer le dominateur immédiat de \lstinline{v} est naturel~: on itère sur les prédécesseurs, en rajoutant un prédécesseur (correspondant au dominateur partiel pour un ensemble singleton le contenant) à chaque étape. Il nous faut pour ça un moins un prédécesseur du nœud, ce qui est assuré par la ligne \ref{line:idom_ghost} qui sert à aider les prouveurs à vérifier l'assertion de la ligne suivante. L'invariant de cette boucle est donné aux lignes \ref{line:idom_loop_c_begin} à \ref{line:idom_loop_c_end}. On a comme d'habitude un ensemble de sommets restant à traiter~; on garde comme invariant l'invariant global sur la correction des valeurs déjà calculées du tableau des dominateurs immédiats, ainsi que le fait que la valeur actuelle \lstinline{idom_v} est un dominateur partiel immédiat pour l'ensemble des prédécesseurs déjà traités. On a finalement aussi les invariants classiques de ce genre de boucle, stipulant que l'ensemble des sommets restant à traiter est bien un sous-ensemble de ceux à traiter, et que son union avec ceux déjà traités est égale à ceux à traiter.
 
 Après cette boucle, on peut alors mettre à jour le tableau des dominateurs immédiats avec la valeur obtenue, et passer à l'itération suivante. Dans le cas de l'exception \lstinline{Root}, on utilise \lstinline{root} comme dominateur immédiat, ce qui ne peut se produire que si \lstinline{root} est un dominateur immédiat partiel, et donc a fortiori un dominateur immédiat.
 
